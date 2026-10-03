@@ -1,0 +1,39 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  nix:
+    name: Nix flake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: cachix/install-nix-action@v31
+      - name: Formatting
+        run: nix fmt -- --ci
+      - name: Evaluate and build the example systems
+        run: nix flake check --print-build-logs
+
+  tofu:
+    name: OpenTofu modules
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [installer-iso, nixos-vm]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: opentofu/setup-opentofu@v1
+      - run: tofu fmt -check -recursive
+        working-directory: tofu/modules/${{ matrix.module }}
+      - run: tofu init -backend=false -input=false && tofu validate
+        working-directory: tofu/modules/${{ matrix.module }}
