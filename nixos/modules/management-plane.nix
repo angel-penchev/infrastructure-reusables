@@ -88,7 +88,12 @@ in
       tokenFile = mkOption {
         type = types.str;
         default = "/var/lib/github-runner/.token";
-        description = "Registration token, placed by hand once per plane.";
+        description = ''
+          Registration token, needed once: the runner registers with it on its
+          first start and keeps its own credentials from then on. Until the
+          file exists the runner does not start, so a plane can be deployed
+          with the runner enabled before its token arrives.
+        '';
       };
     };
   };
@@ -157,6 +162,7 @@ in
           # and the switch need ssh.
           jq
           openssh
+          curl
         ];
         extraLabels = cfg.runner.labels;
 
@@ -177,6 +183,13 @@ in
     # so a new runner version waits for the next reboot or a manual restart.
     systemd.services."github-runner-${cfg.runner.name}" = mkIf cfg.runner.enable {
       restartIfChanged = false;
+      # Skipped, not failed, until it has a token to register with or has
+      # registered already: a switch that enables the runner before the token
+      # is placed would otherwise fail on the unit.
+      unitConfig.ConditionPathExists = [
+        "|${cfg.runner.tokenFile}"
+        "|/var/lib/github-runner/${cfg.runner.name}/.runner"
+      ];
     };
 
     # Keep parent directory traversable for the runner service process.
