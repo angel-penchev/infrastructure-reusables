@@ -5,7 +5,7 @@ variable "flake_attr" {
 
 variable "iso_name" {
   type        = string
-  description = "The ISO's file name without .iso: servacho.installer.name of the system that builds it."
+  description = "servacho.installer.name of the system that builds it: the ISO's file name in the build without .iso, and the start of its name on the storage."
 }
 
 variable "node_name" {
@@ -17,10 +17,4 @@ variable "datastore_id" {
   type        = string
   default     = "local"
   description = "Storage that holds ISO images on that node."
-}
-
-variable "generation" {
-  type        = string
-  default     = "1"
-  description = "Change to rebuild the ISO from the current flake and upload it again under the same name."
 }

@@ -2,12 +2,12 @@
 # storage, for nixos-vm to boot new VMs from. An ISO goes through the Proxmox
 # API; a disk image or a backup would need SSH to the node.
 #
-# A plan only evaluates the ISO's store path; the 1.5 GB build happens at
-# apply, when the ISO is first uploaded or `generation` changes. A newer
-# flake does not re-upload it on its own: the installer only has to boot a VM
-# far enough for nixos-anywhere, which installs what the flake says at that
-# moment. Bumping `generation` rebuilds and re-uploads it under the same name,
-# so VMs that keep it attached keep a valid reference.
+# The ISO follows the flake: a plan evaluates its store path, which changes
+# exactly when anything that goes into it does (nixpkgs, the installer module,
+# the keys it lets in). A new store path is built at apply (1.5 GB, mostly
+# from the binary cache) and uploaded under a name of its own,
+# <iso_name>-<hash>.iso. VMs that have the old one attached are moved onto it
+# before the old one is deleted, so none ever points at a missing ISO.
 
 data "external" "iso" {
   program = [
@@ -22,8 +22,16 @@ data "external" "iso" {
   ]
 }
 
+locals {
+  out = data.external.iso.result.out
+  # The store path's hash: short, and different for every build.
+  file_name = "${var.iso_name}-${substr(basename(local.out), 0, 8)}.iso"
+}
+
+# The upload reads the ISO from the store, so it waits for this build.
 resource "terraform_data" "build" {
-  triggers_replace = [var.generation]
+  input            = local.out
+  triggers_replace = [local.out]
 
   provisioner "local-exec" {
     command = "nix --extra-experimental-features 'nix-command flakes' build --no-link '${var.flake_attr}'"
@@ -36,13 +44,11 @@ resource "proxmox_virtual_environment_file" "iso" {
   node_name    = var.node_name
 
   source_file {
-    path = "${data.external.iso.result.out}/iso/${var.iso_name}.iso"
+    path      = "${terraform_data.build.output}/iso/${var.iso_name}.iso"
+    file_name = local.file_name
   }
 
   lifecycle {
-    ignore_changes       = [source_file]
-    replace_triggered_by = [terraform_data.build]
+    create_before_destroy = true
   }
-
-  depends_on = [terraform_data.build]
 }
