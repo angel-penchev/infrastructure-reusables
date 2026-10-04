@@ -8,8 +8,9 @@
 #   3. the host comes up on its static address, where every later change to
 #      its configuration is deployed in place.
 #
-# The install runs once per VM: a VM replaced under the same id gets a new MAC
-# address and so a new installation_id, and installs again.
+# The install runs once per VM that OpenTofu creates: a VM it replaces is
+# installed again, while one restored from a backup outside OpenTofu (any MAC,
+# same id) keeps its disk.
 
 locals {
   # Where the installer can be reached: an address it got by DHCP, as the
@@ -19,10 +20,20 @@ locals {
     if !startswith(ip, "127.") && !startswith(ip, "169.254.")
   ]
 
-  installation_id = join("/", [
-    proxmox_virtual_environment_vm.this.vm_id,
-    proxmox_virtual_environment_vm.this.network_device[0].mac_address,
-  ])
+  installation_id = terraform_data.installation.id
+}
+
+# One per VM OpenTofu creates. Nothing Proxmox can change about the VM (its MAC
+# after a restore, its configuration) replaces it; a deliberate reinstall is
+# `tofu apply -replace=<this module>.terraform_data.installation`.
+resource "terraform_data" "installation" {
+  input = proxmox_virtual_environment_vm.this.vm_id
+
+  lifecycle {
+    # A replacement of the VM plans its id as unknown; an in-place update or a
+    # refresh after a restore keeps it.
+    replace_triggered_by = [proxmox_virtual_environment_vm.this.id]
+  }
 }
 
 resource "proxmox_virtual_environment_vm" "this" {
@@ -102,8 +113,11 @@ module "install" {
 
   nixos_partitioner = module.disko.result.out
   nixos_system      = module.system.result.out
-  # Only the first install uses this, and a different value later changes
-  # nothing; the fallback keeps plans working while the VM is off.
+  # Only the install uses this, and a different value later changes nothing;
+  # the fallback keeps plans working while the VM is off. On a new VM the
+  # installer's guest agent answers only once DHCP gave it an address
+  # (nixosModules.installer), and creating the VM waits for the agent, so the
+  # install never falls back to the static address.
   target_host     = try(local.installer_addresses[0], var.address)
   target_user     = "root"
   ssh_private_key = var.ssh_private_key

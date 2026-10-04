@@ -7,6 +7,6 @@ output "address" {
 }
 
 output "installation_id" {
-  description = "Changes exactly when the VM is installed again. Use it to trigger one-off setup of the installed host."
+  description = "Changes exactly when the VM is installed again: when OpenTofu creates or replaces it, or terraform_data.installation is replaced. Use it to trigger one-off setup of the installed host."
   value       = local.installation_id
 }
