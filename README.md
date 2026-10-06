@@ -25,7 +25,7 @@ All of them pin this repository by tag.
 
 ```nix
 {
-  inputs.reusables.url = "github:angel-penchev/infrastructure-reusables/v0.2.0";
+  inputs.reusables.url = "github:angel-penchev/infrastructure-reusables/v0.4.0";
   inputs.nixpkgs.follows = "reusables/nixpkgs";
   # or: inputs.reusables.inputs.nixpkgs.follows = "nixpkgs";
 }
@@ -56,10 +56,14 @@ Both use the `bpg/proxmox` provider from the caller, through the Proxmox API
 only: the provider needs no SSH to the node.
 
 `tofu/modules/installer-iso` builds the installer from a flake and uploads it
-to a Proxmox storage. A plan only evaluates its store path; whenever that
-changes (a nixpkgs bump, a new key, a change to the installer) the apply builds
-it and uploads it as `<iso_name>-<hash>.iso`, moves the VMs that have the old
-one attached onto it, and deletes the old one.
+to a Proxmox storage. Whenever its store path changes (a nixpkgs bump, a new
+key, a change to the installer) it uploads it as `<iso_name>-<hash>.iso`, moves
+the VMs that have the old one attached onto it, and deletes the old one. The
+provider reads the uploaded file on every refresh, so a plan realises the ISO
+(building it only when it is new or was garbage-collected), and each uploaded
+build keeps a garbage collector root in `gc_root_dir` (default
+`/var/lib/opentofu/gcroots`, the plane runner's state directory) until it has
+been replaced.
 
 `tofu/modules/nixos-vm` takes a VM from nothing to a deployed host: an empty
 disk, the installer, nixos-anywhere with the host's disko layout, a reboot onto
@@ -77,14 +81,14 @@ tofu apply -replace='module.<name>.terraform_data.installation'
 
 ```hcl
 module "installer" {
-  source     = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/installer-iso?ref=v0.2.0"
+  source     = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/installer-iso?ref=v0.4.0"
   flake_attr = "${abspath("${path.module}/../nixos")}#installer-iso"
   iso_name   = "qoax-installer"
   node_name  = "Servacho-Gosho"
 }
 
 module "k3s_server" {
-  source           = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/nixos-vm?ref=v0.2.0"
+  source           = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/nixos-vm?ref=v0.4.0"
   name             = "qoaxhack-prod-1"
   node_name        = "Servacho-Gosho"
   vm_id            = 10021

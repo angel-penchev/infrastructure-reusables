@@ -18,3 +18,14 @@ variable "datastore_id" {
   default     = "local"
   description = "Storage that holds ISO images on that node."
 }
+
+variable "gc_root_dir" {
+  type        = string
+  default     = "/var/lib/opentofu/gcroots"
+  description = "A directory that survives between runs, for the garbage collector roots that keep each uploaded ISO's store path; the provider reads that file on every refresh. The default is in the OpenTofu state directory of nixosModules.management-plane's runner."
+
+  validation {
+    condition     = startswith(var.gc_root_dir, "/")
+    error_message = "gc_root_dir must be an absolute path."
+  }
+}
