@@ -1,0 +1,51 @@
+name: "OpenTofu plan"
+description: >-
+  Plans a management plane's OpenTofu and, on a pull request, posts the plan
+  as a comment. A plan replaces the previous plan's comment until an apply is
+  posted after it, so the thread keeps the order: plan, apply, plan. A failed
+  plan fails the step after it has been posted.
+inputs:
+  working_directory:
+    description: "The OpenTofu root module"
+    required: false
+    default: "tofu"
+  vault_token:
+    description: "Token for the plane's OpenBao, as VAULT_TOKEN"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: OpenTofu init
+      shell: bash
+      run: tofu -chdir="$WORKING_DIRECTORY" init -input=false
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+
+    - name: OpenTofu plan
+      id: plan
+      shell: bash
+      env:
+        WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        VAULT_TOKEN: ${{ inputs.vault_token }}
+      run: |
+        set +e -o pipefail
+        tofu -chdir="$WORKING_DIRECTORY" plan -no-color -input=false 2>&1 | tee "$RUNNER_TEMP/tofu-plan.txt"
+        echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+    - name: Post the plan to the pull request
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      env:
+        PLAN_EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
+        PLAN_OUTPUT_FILE: ${{ runner.temp }}/tofu-plan.txt
+        COMMENT_SCRIPT: ${{ github.action_path }}/comment.js
+      with:
+        script: await require(process.env.COMMENT_SCRIPT)({ github, context });
+
+    - name: Fail if the plan failed
+      if: steps.plan.outputs.exit_code != '0'
+      shell: bash
+      run: |
+        echo "::error::OpenTofu plan failed; see the log above or the pull request comment."
+        exit 1

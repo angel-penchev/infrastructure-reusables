@@ -1,0 +1,51 @@
+// Posts the plan on the pull request; see action.yml.
+const fs = require('fs');
+
+module.exports = async ({ github, context }) => {
+  const { owner, repo } = context.repo;
+  const path = process.env.PLAN_OUTPUT_FILE;
+  let planOutput = fs.existsSync(path) ? fs.readFileSync(path, 'utf8') : 'No plan output found.';
+  const summaryMatch = planOutput.match(/^(Plan: .*|No changes\..*)$/m);
+  const maxLen = 60000;
+  if (planOutput.length > maxLen) {
+    planOutput = `...truncated...\n\n${planOutput.slice(-maxLen)}`;
+  }
+  const status = process.env.PLAN_EXIT_CODE === '0' ? 'Success' : 'Failed';
+  const sha = context.payload.pull_request.head.sha;
+  const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+  const lines = [
+    '### OpenTofu Plan Results',
+    `**Status:** ${status}`,
+  ];
+  if (summaryMatch) {
+    lines.push(`**Summary:** ${summaryMatch[0]}`);
+  }
+  lines.push(
+    `**Commit:** ${sha.slice(0, 7)}`,
+    `**Run:** ${runUrl}`,
+    `**Generated:** ${new Date().toUTCString()}`,
+    '',
+    '```hcl',
+    planOutput,
+    '```',
+  );
+  const body = lines.join('\n');
+
+  // A plan replaces the previous plan while nothing happened in between.
+  // Once an apply has been posted after it, the next plan starts a new
+  // comment, so the thread keeps the order: plan, apply, plan.
+  const planMarker = '### OpenTofu Plan Results';
+  const applyMarker = '### OpenTofu Apply Results';
+  const comments = await github.paginate(github.rest.issues.listComments, {
+    owner, repo, issue_number: context.issue.number,
+  });
+  const botComments = comments.filter(comment =>
+    comment.user.type === 'Bot' &&
+    (comment.body.includes(planMarker) || comment.body.includes(applyMarker)));
+  const last = botComments[botComments.length - 1];
+  if (last && last.body.includes(planMarker)) {
+    await github.rest.issues.updateComment({ owner, repo, comment_id: last.id, body });
+  } else {
+    await github.rest.issues.createComment({ owner, repo, issue_number: context.issue.number, body });
+  }
+};
