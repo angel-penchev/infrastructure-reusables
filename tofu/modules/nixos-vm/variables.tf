@@ -59,6 +59,15 @@ variable "disk_size" {
   description = "GiB."
 }
 
+variable "data_disks" {
+  type = list(object({
+    size   = number
+    backup = optional(bool, true)
+  }))
+  default     = []
+  description = "Disks after the system disk, in order: /dev/vdb onwards on the host, which mounts them through nixosModules.proxmox-guest's dataDisks. size is in GiB; backup = false keeps a disk out of Proxmox backups (say, one whose data is replicated or backed up inside the VM)."
+}
+
 variable "datastore_id" {
   type        = string
   default     = "local-lvm"
@@ -94,4 +103,16 @@ variable "ssh_private_key" {
   type        = string
   sensitive   = true
   description = "Private key that root on the installer and on the host accepts."
+}
+
+variable "extra_files" {
+  type        = map(string)
+  default     = {}
+  sensitive   = true
+  description = "Files placed on the host at install, by absolute path: what the host's configuration must not contain, such as a k3s cluster token. Only the install writes them; later changes reach an installed host only through a reinstall. Files are 0600 root, directories 0755."
+
+  validation {
+    condition     = alltrue([for path in keys(var.extra_files) : startswith(path, "/") && !strcontains(path, "..")])
+    error_message = "extra_files keys are absolute paths without '..'."
+  }
 }
