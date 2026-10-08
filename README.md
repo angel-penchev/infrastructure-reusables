@@ -71,6 +71,11 @@ the static address, and from then on every change to the host deployed in
 place. The install runs once per VM that OpenTofu creates; `installation_id`
 changes exactly when it runs again, for one-off setup that has to follow it.
 
+`memory_floating` below `memory` turns on ballooning: the guest hands idle
+memory back to the host under pressure, down to that much. It suits a
+management plane, whose plans need memory only now and then; leave it at 0 for
+a Kubernetes node.
+
 `data_disks` attaches disks after the system disk, `/dev/vdb` onwards, which
 the host mounts through `servacho.proxmoxGuest.dataDisks` (one ext4 filesystem
 per disk, grown with it). `extra_files` places files the host's configuration
