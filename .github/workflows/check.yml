@@ -24,6 +24,23 @@ jobs:
       - name: Evaluate and build the example systems
         run: nix flake check --print-build-logs
 
+  scripts:
+    name: Scripts are executable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # The modules run their scripts directly (nixos-anywhere checks -x), so
+      # a script committed without its executable bit fails only at apply.
+      - run: |
+          status=0
+          for f in $(git ls-files '*.sh'); do
+            if [ "$(git ls-files -s "$f" | cut -c1-6)" != 100755 ]; then
+              echo "::error file=$f::committed without its executable bit (git update-index --chmod=+x $f)"
+              status=1
+            fi
+          done
+          exit $status
+
   tofu:
     name: OpenTofu modules
     runs-on: ubuntu-latest
