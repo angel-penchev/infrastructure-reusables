@@ -62,8 +62,11 @@ resource "proxmox_virtual_environment_vm" "this" {
     type  = var.cpu_type
   }
 
+  # With memory_floating below memory, the guest's balloon driver hands idle
+  # memory back when the host runs short, down to memory_floating.
   memory {
     dedicated = var.memory
+    floating  = var.memory_floating
   }
 
   # Empty until disko partitions it. Growing it later grows the root

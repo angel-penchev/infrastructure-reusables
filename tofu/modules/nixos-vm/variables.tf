@@ -53,6 +53,16 @@ variable "memory" {
   description = "MiB."
 }
 
+variable "memory_floating" {
+  default     = 0
+  description = "MiB the VM is guaranteed when Proxmox balloons it: below memory, the guest gives idle memory back to the host under pressure, down to this. 0 turns ballooning off and keeps memory fixed, as a Kubernetes node wants."
+
+  validation {
+    condition     = var.memory_floating == 0 || (var.memory_floating > 0 && var.memory_floating <= var.memory)
+    error_message = "memory_floating is 0 or at most memory."
+  }
+}
+
 variable "disk_size" {
   type        = number
   default     = 32
