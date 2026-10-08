@@ -149,6 +149,13 @@ in
     };
     networking.useDHCP = mkIf (cfg.network != null) false;
 
+    # Compressed swap in RAM: a burst of Nix evaluations in a plan slows down
+    # instead of the OOM killer taking the runner, and with it the job.
+    zramSwap = {
+      enable = true;
+      memoryPercent = 50;
+    };
+
     services.github-runners = mkIf cfg.runner.enable {
       ${cfg.runner.name} = {
         enable = true;

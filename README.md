@@ -143,7 +143,10 @@ jobs:
 ```
 
 `tofu-apply` takes the same inputs, plus `branch` for a manual run of a branch
-or tag. `working_directory` (default `tofu`) selects the root module.
+or tag. `working_directory` (default `tofu`) selects the root module, and
+`parallelism` (default 4) how many operations OpenTofu runs at once: each NixOS
+host or ISO a plan reads is a Nix evaluation of up to about 0.75 GB, so it
+bounds the plane's memory however many hosts the repository has.
 
 ## Checks
 
