@@ -1,0 +1,67 @@
+name: "Unseal OpenBao"
+description: >-
+  Makes sure the management plane's OpenBao is unsealed before a job reads it.
+  With unseal keys it unseals a sealed OpenBao; without them it only checks,
+  for a repository whose plane is unsealed by someone else. Either way a job
+  that cannot read OpenBao fails here, with the reason, rather than in tofu.
+inputs:
+  vault_addr:
+    description: "The address of the plane's OpenBao"
+    required: false
+    default: "http://127.0.0.1:8200"
+  unseal_keys:
+    description: "Unseal keys, separated by spaces, commas or newlines; empty to only check"
+    required: false
+    default: ""
+  sealed_hint:
+    description: "What to do when it is sealed and there are no keys, added to the error"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Unseal OpenBao
+      shell: bash
+      env:
+        VAULT_ADDR: ${{ inputs.vault_addr }}
+        UNSEAL_KEYS: ${{ inputs.unseal_keys }}
+        SEALED_HINT: ${{ inputs.sealed_hint }}
+      run: |
+        # Sets $sealed to true or false. /sys/health answers a sealed OpenBao
+        # with a non-2xx status; the body still says so.
+        check() {
+          local health
+          if ! health=$(curl -s "$VAULT_ADDR/v1/sys/health") || [ -z "$health" ]; then
+            echo "::error::OpenBao is unreachable at $VAULT_ADDR"
+            exit 1
+          fi
+          if ! sealed=$(jq -r '.sealed | if type == "boolean" then . else error end' <<<"$health" 2>/dev/null); then
+            echo "::error::Unexpected answer from $VAULT_ADDR/v1/sys/health: $health"
+            exit 1
+          fi
+        }
+
+        check
+        if [ "$sealed" = false ]; then
+          echo "OpenBao is unsealed."
+          exit 0
+        fi
+        if [ -z "$UNSEAL_KEYS" ]; then
+          echo "::error::OpenBao at $VAULT_ADDR is sealed. $SEALED_HINT"
+          exit 1
+        fi
+
+        echo "OpenBao is sealed; unsealing it."
+        # Each key reaches curl on stdin, never on a command line.
+        for key in $(tr ',\n' '  ' <<<"$UNSEAL_KEYS"); do
+          jq -nc --arg key "$key" '{key: $key}' |
+            curl -s -X PUT --data @- "$VAULT_ADDR/v1/sys/unseal" >/dev/null
+        done
+        check
+        if [ "$sealed" = false ]; then
+          echo "OpenBao is unsealed."
+        else
+          echo "::error::OpenBao is still sealed; the keys given are not enough."
+          exit 1
+        fi
