@@ -19,8 +19,8 @@ All of them pin this repository by tag.
 |---|---|
 | `nixosModules.base` | What every VM shares: SSH by key only, the QEMU guest agent, the nftables firewall, Nix housekeeping |
 | `nixosModules.management-plane` | `servacho.managementPlane.*`: OpenTofu, OpenBao on loopback, an optional GitHub runner, an optional static address |
-| `nixosModules.k3s-node` | `servacho.k3s.*`: a k3s server or agent with its firewall and Longhorn's host side |
-| `nixosModules.proxmox-guest` | The hardware and disko disk layout of a VM installed by `tofu/modules/nixos-vm`; brings disko with it |
+| `nixosModules.k3s-node` | `servacho.k3s.*`: a k3s server or agent with its firewall, flannel's backend (VXLAN or WireGuard), kubelet image garbage collection, and Longhorn's host side |
+| `nixosModules.proxmox-guest` | The hardware and disko disk layout of a VM installed by `tofu/modules/nixos-vm`, data disks included (`servacho.proxmoxGuest.dataDisks`); brings disko with it |
 | `nixosModules.installer` | `servacho.installer.*`: the ISO `nixos-vm` boots VMs from |
 
 ```nix
@@ -71,6 +71,13 @@ the static address, and from then on every change to the host deployed in
 place. The install runs once per VM that OpenTofu creates; `installation_id`
 changes exactly when it runs again, for one-off setup that has to follow it.
 
+`data_disks` attaches disks after the system disk, `/dev/vdb` onwards, which
+the host mounts through `servacho.proxmoxGuest.dataDisks` (one ext4 filesystem
+per disk, grown with it). `extra_files` places files the host's configuration
+must not hold, such as a k3s cluster token, at install: they travel to the
+install script in its environment, not through the state or the Nix store, and
+a later change reaches the host only through a reinstall.
+
 A VM restored from a backup is left alone: restore it under the same id, with
 any MAC address, and the next apply deploys the current configuration onto it
 without reinstalling. To reinstall a VM on purpose:
@@ -91,14 +98,18 @@ module "k3s_server" {
   source           = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/nixos-vm?ref=v0.5.0"
   name             = "qoaxhack-prod-1"
   node_name        = "Servacho-Gosho"
-  vm_id            = 10021
+  vm_id            = 10031
   pool_id          = "pool-qoax-community"
   vlan_id          = 10
   installer_iso_id = module.installer.file_id
   flake            = abspath("${path.module}/../nixos")
   host             = "qoaxhack-prod-1"
-  address          = "192.168.10.21"
+  address          = "192.168.10.31"
   ssh_private_key  = data.vault_kv_secret_v2.deploy_key.data["private_key"]
+  data_disks       = [{ size = 100, backup = false }] # Longhorn's
+  extra_files = {
+    "/etc/rancher/k3s/config.yaml" = "token: ${random_password.k3s.result}\ncluster-init: true\n"
+  }
 }
 ```
 

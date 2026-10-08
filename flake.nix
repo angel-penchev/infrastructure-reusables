@@ -80,6 +80,29 @@
                 enable = true;
                 role = "server";
                 clusterNetworks = [ "192.0.2.0/24" ];
+                apiSources = [ "198.51.100.15/32" ];
+                flannelBackend = "wireguard-native";
+                longhorn.enable = true;
+              };
+              servacho.proxmoxGuest.dataDisks = [ "/var/lib/longhorn" ];
+            }
+          ]).config.system.build.toplevel;
+        k3s-agent =
+          (example [
+            self.nixosModules.base
+            self.nixosModules.k3s-node
+            self.nixosModules.proxmox-guest
+            {
+              networking.hostName = "example-k3s-agent";
+              servacho.k3s = {
+                enable = true;
+                role = "agent";
+                clusterNetworks = [ "192.0.2.0/24" ];
+                flannelBackend = "wireguard-native";
+                imageGC = {
+                  highThreshold = 75;
+                  lowThreshold = 60;
+                };
               };
             }
           ]).config.system.build.toplevel;
