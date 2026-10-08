@@ -77,6 +77,21 @@ resource "proxmox_virtual_environment_vm" "this" {
     iothread     = true
   }
 
+  # Data disks after it, virtio1 onwards: /dev/vdb, /dev/vdc, ... on the
+  # host, mounted where nixosModules.proxmox-guest's dataDisks says.
+  dynamic "disk" {
+    for_each = var.data_disks
+    content {
+      interface    = "virtio${disk.key + 1}"
+      datastore_id = var.datastore_id
+      file_format  = "raw"
+      size         = disk.value.size
+      discard      = "ignore"
+      iothread     = true
+      backup       = disk.value.backup
+    }
+  }
+
   cdrom {
     enabled   = true
     file_id   = var.installer_iso_id
@@ -124,6 +139,11 @@ module "install" {
   instance_id     = local.installation_id
   # The installer is NixOS already, so there is nothing to kexec into.
   phases = ["disko", "install", "reboot"]
+
+  # The files reach the script through the environment, which is not kept in
+  # the state, and never touch the flake or the Nix store.
+  extra_files_script = length(var.extra_files) > 0 ? "${path.module}/extra-files.sh" : null
+  extra_environment  = length(var.extra_files) > 0 ? { EXTRA_FILES = jsonencode(var.extra_files) } : {}
 }
 
 module "deploy" {

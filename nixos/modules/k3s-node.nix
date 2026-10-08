@@ -20,7 +20,8 @@ let
 
   # https://docs.k3s.io/installation/requirements#inbound-rules-for-k3s-nodes
   # 10250 kubelet metrics (every node); 6443 API and supervisor, 2379-2380
-  # etcd (servers); 8472/udp flannel VXLAN (every node).
+  # etcd (servers); flannel's VXLAN (8472/udp) or WireGuard (51820/udp) on
+  # every node.
   clusterTcpPorts = [
     10250
   ]
@@ -29,7 +30,7 @@ let
     2379
     2380
   ];
-  clusterUdpPorts = [ 8472 ];
+  clusterUdpPorts = if cfg.flannelBackend == "wireguard-native" then [ 51820 ] else [ 8472 ];
 
   nftSet = xs: "{ ${lib.concatStringsSep ", " (map toString xs)} }";
 in
@@ -71,9 +72,64 @@ in
         `server:` to join. Until the file exists the unit stays inactive
         (a systemd condition, not a failure), so a template that boots before
         it is configured never initialises a stray single-node cluster.
-        cloud-init's `write_files` or a colmena key can place it; k3s reads it
-        on every start. Set to null to configure k3s through the NixOS options
+        infrastructure-reusables' `nixos-vm` places it at install
+        (`extra_files`); cloud-init's `write_files` or a colmena key can too.
+        k3s reads it on every start. Set to null to configure k3s through the NixOS options
         alone and start it unconditionally.
+      '';
+    };
+
+    apiSources = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "192.168.10.15/32" ];
+      description = ''
+        Further source CIDRs allowed to reach a server's API (6443) and
+        nothing else: a management plane or a runner that runs kubectl.
+      '';
+    };
+
+    flannelBackend = mkOption {
+      type = types.enum [
+        "vxlan"
+        "wireguard-native"
+      ];
+      default = "vxlan";
+      description = ''
+        How flannel carries pod traffic between nodes. `wireguard-native`
+        encrypts it. A server passes it to k3s; agents follow their server,
+        and the option only opens the matching port on them. Every node of a
+        cluster must agree.
+      '';
+    };
+
+    imageGC = mkOption {
+      type = types.nullOr (
+        types.submodule {
+          options = {
+            highThreshold = mkOption {
+              type = types.ints.between 1 100;
+              description = "Disk usage, in percent, at which the kubelet starts deleting unused images.";
+            };
+            lowThreshold = mkOption {
+              type = types.ints.between 0 99;
+              description = "Disk usage, in percent, the kubelet deletes unused images down to.";
+            };
+          };
+        }
+      );
+      default = null;
+      example = {
+        highThreshold = 75;
+        lowThreshold = 60;
+      };
+      description = ''
+        When the kubelet garbage-collects unused images, if not at its
+        defaults (85 and 80). A node that pulls many short-lived images, such
+        as one running pull request previews, prunes earlier so the images
+        never reach a disk pressure alert. Volume data is not images: k3s's
+        local-path StorageClass keeps `reclaimPolicy: Delete`, so a volume's
+        data goes with its claim.
       '';
     };
 
@@ -105,6 +161,10 @@ in
         assertion = cfg.clusterNetworks != [ ];
         message = "servacho.k3s.clusterNetworks must list at least one CIDR.";
       }
+      {
+        assertion = cfg.imageGC == null || cfg.imageGC.lowThreshold < cfg.imageGC.highThreshold;
+        message = "servacho.k3s.imageGC.lowThreshold must be below highThreshold.";
+      }
     ];
 
     services.k3s = {
@@ -114,6 +174,12 @@ in
       # Drain pods before a reboot (PBS snapshots, kernel updates) instead of
       # letting containerd kill them.
       gracefulNodeShutdown.enable = true;
+      extraFlags =
+        lib.optionals (cfg.role == "server") [ "--flannel-backend=${cfg.flannelBackend}" ]
+        ++ lib.optionals (cfg.imageGC != null) [
+          "--kubelet-arg=image-gc-high-threshold=${toString cfg.imageGC.highThreshold}"
+          "--kubelet-arg=image-gc-low-threshold=${toString cfg.imageGC.lowThreshold}"
+        ];
     };
 
     # The kubelet holds a logind inhibitor for the grace period; logind caps
@@ -132,6 +198,7 @@ in
       trustedInterfaces = [
         "cni0"
         "flannel.1"
+        "flannel-wg"
       ];
       allowedTCPPorts = mkIf cfg.exposeIngress [
         80
@@ -140,6 +207,9 @@ in
       extraInputRules = ''
         ip saddr ${nftSet cfg.clusterNetworks} tcp dport ${nftSet clusterTcpPorts} accept
         ip saddr ${nftSet cfg.clusterNetworks} udp dport ${nftSet clusterUdpPorts} accept
+      ''
+      + lib.optionalString (cfg.role == "server" && cfg.apiSources != [ ]) ''
+        ip saddr ${nftSet cfg.apiSources} tcp dport 6443 accept
       '';
       # kube-proxy's NAT and the overlay make strict reverse-path filtering
       # drop legitimate cross-node traffic; loose still rejects spoofed sources.
