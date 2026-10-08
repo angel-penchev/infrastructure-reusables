@@ -12,6 +12,13 @@ inputs:
   vault_token:
     description: "Token for the plane's OpenBao, as VAULT_TOKEN"
     required: true
+  parallelism:
+    description: >-
+      Operations OpenTofu runs at once. Each NixOS host or ISO a plan reads is
+      a Nix evaluation of up to about 0.75 GB, so this bounds the plane's
+      memory however many hosts the repository has.
+    required: false
+    default: "4"
   branch:
     description: "Branch or tag a manual run applied; empty for a push"
     required: false
@@ -32,9 +39,10 @@ runs:
       env:
         WORKING_DIRECTORY: ${{ inputs.working_directory }}
         VAULT_TOKEN: ${{ inputs.vault_token }}
+        PARALLELISM: ${{ inputs.parallelism }}
       run: |
         set +e -o pipefail
-        tofu -chdir="$WORKING_DIRECTORY" apply -auto-approve -no-color -input=false 2>&1 | tee "$RUNNER_TEMP/tofu-apply.txt"
+        tofu -chdir="$WORKING_DIRECTORY" apply -auto-approve -no-color -input=false -parallelism="$PARALLELISM" 2>&1 | tee "$RUNNER_TEMP/tofu-apply.txt"
         echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
     - name: Post the apply to the pull request
