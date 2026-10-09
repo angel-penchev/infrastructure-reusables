@@ -90,9 +90,26 @@ in
         default = "/var/lib/github-runner/.token";
         description = ''
           Registration token, needed once: the runner registers with it on its
-          first start and keeps its own credentials from then on. Until the
-          file exists the runner does not start, so a plane can be deployed
-          with the runner enabled before its token arrives.
+          first start and keeps its own credentials from then on. With
+          `ephemeral`, it registers again before every job, so the file must
+          hold a personal access token that may manage the repository's
+          runners (fine-grained: Administration read and write), not a
+          one-hour registration token. Until the file exists the runner does
+          not start, so a plane can be deployed with the runner enabled before
+          its token arrives. Jobs cannot read it (the unit makes it
+          inaccessible).
+        '';
+      };
+
+      ephemeral = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Run one job per registration: after each job the runner
+          de-registers, its state and work directories are wiped and it
+          registers afresh, so nothing a job leaves behind in them meets the
+          next job. `/var/lib/opentofu` (state, GC roots) is kept. Needs a
+          personal access token in `tokenFile`; enable it once one is there.
         '';
       };
     };
@@ -159,7 +176,7 @@ in
     services.github-runners = mkIf cfg.runner.enable {
       ${cfg.runner.name} = {
         enable = true;
-        inherit (cfg.runner) url tokenFile;
+        inherit (cfg.runner) url tokenFile ephemeral;
         extraPackages = with pkgs; [
           opentofu
           git
