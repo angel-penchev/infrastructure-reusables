@@ -66,6 +66,12 @@
               servacho.managementPlane = {
                 enable = true;
                 network = exampleNetwork;
+                runner = {
+                  enable = true;
+                  url = "https://github.com/angel-penchev/servacho-infrastructure";
+                  labels = [ "example-management-plane" ];
+                  ephemeral = true;
+                };
               };
             }
           ]).config.system.build.toplevel;
