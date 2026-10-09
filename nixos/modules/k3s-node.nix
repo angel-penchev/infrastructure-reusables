@@ -216,6 +216,16 @@ in
       checkReversePath = "loose";
     };
 
+    # The CNI owns the pod network's links. A host .network that matches
+    # broadly, such as Type=ether, also matches every pod's veth: networkd
+    # then gives it the node's address and a default route and takes it out
+    # of cni0, and no pod reaches the API. networkd uses the first file that
+    # matches, so this one sorts first. Inert unless networkd is enabled.
+    systemd.network.networks."00-k3s-cni" = {
+      matchConfig.Name = "veth* cni0 flannel*";
+      linkConfig.Unmanaged = true;
+    };
+
     # Container-heavy nodes exhaust the kernel defaults quickly.
     boot.kernel.sysctl = {
       "fs.inotify.max_user_instances" = 8192;
