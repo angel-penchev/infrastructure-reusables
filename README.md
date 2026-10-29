@@ -20,6 +20,7 @@ All of them pin this repository by tag.
 | `nixosModules.base` | What every VM shares: SSH by key only, the QEMU guest agent, the nftables firewall, Nix housekeeping |
 | `nixosModules.management-plane` | `servacho.managementPlane.*`: OpenTofu, OpenBao on loopback, an optional GitHub runner, an optional static address |
 | `nixosModules.k3s-node` | `servacho.k3s.*`: a k3s server or agent with its firewall, flannel's backend (VXLAN or WireGuard), kubelet image garbage collection, and Longhorn's host side |
+| `nixosModules.docker-host` | `servacho.dockerHost.*`: Docker with Compose for a stack its owner runs by hand, reverse proxy included; an optional static address; the stack reachable from the LAN only on its ingress ports (`80`, `443`), and those only from the shared ingress |
 | `nixosModules.proxmox-guest` | The hardware and disko disk layout of a VM installed by `tofu/modules/nixos-vm`, data disks included (`servacho.proxmoxGuest.dataDisks`); brings disko with it |
 | `nixosModules.installer` | `servacho.installer.*`: the ISO `nixos-vm` boots VMs from |
 
@@ -48,6 +49,26 @@ nixosConfigurations.installer = nixpkgs.lib.nixosSystem {
 };
 packages.x86_64-linux.installer-iso =
   self.nixosConfigurations.installer.config.system.build.isoImage;
+```
+
+A Docker host serves a Compose stack whose reverse proxy (Traefik, say) takes
+the host's names from the shared ingress. Docker publishes a container's
+ports through DNAT, past `networking.firewall`, so `docker-host` filters in
+nftables tables of its own ahead of Docker's: `ingress.ports` only from
+`ingress.sources`, and no other port of the stack from the LAN. Ports a
+container publishes on loopback (`127.0.0.1:5432:5432`) stay reachable from
+the host itself.
+
+```nix
+servacho.dockerHost = {
+  enable = true;
+  network = {
+    address = "192.168.10.41";
+    prefixLength = 23;
+    gateway = "192.168.10.1";
+  };
+  ingress.sources = [ "192.168.4.16/32" ];
+};
 ```
 
 ## OpenTofu modules
@@ -166,8 +187,9 @@ bounds the plane's memory however many hosts the repository has.
 
 ## Checks
 
-`nix flake check` builds an example management plane, k3s server and installer;
-CI also checks formatting and validates the OpenTofu modules.
+`nix flake check` builds an example management plane, k3s server and agent,
+Docker host and installer; CI also checks formatting and validates the
+OpenTofu modules.
 
 ## Commit messages
 
