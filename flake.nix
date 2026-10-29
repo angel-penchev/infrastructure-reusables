@@ -44,6 +44,8 @@
         management-plane = ./nixos/modules/management-plane.nix;
         # servacho.k3s.*: a k3s server or agent with its firewall and Longhorn's host side.
         k3s-node = ./nixos/modules/k3s-node.nix;
+        # servacho.dockerHost.*: Docker for a Compose stack behind the shared ingress.
+        docker-host = ./nixos/modules/docker-host.nix;
         # The hardware and disk layout of a VM installed by tofu/modules/nixos-vm.
         proxmox-guest = {
           imports = [
@@ -109,6 +111,20 @@
                   highThreshold = 75;
                   lowThreshold = 60;
                 };
+              };
+            }
+          ]).config.system.build.toplevel;
+        docker-host =
+          (example [
+            self.nixosModules.base
+            self.nixosModules.docker-host
+            self.nixosModules.proxmox-guest
+            {
+              networking.hostName = "example-docker-host";
+              servacho.dockerHost = {
+                enable = true;
+                network = exampleNetwork;
+                ingress.sources = [ "198.51.100.16/32" ];
               };
             }
           ]).config.system.build.toplevel;
