@@ -198,6 +198,15 @@ in
             "opentofu"
           ];
           StateDirectoryMode = "0700";
+
+          # The unit comes back 30 s after it ends, however it ends: a
+          # registration that fails or times out while GitHub is out of reach
+          # is retried until it succeeds instead of leaving the unit failed.
+          # An ephemeral runner also waits these 30 s between jobs. A stop by
+          # systemctl or a shutdown stays stopped. mkForce, as the github-runner
+          # module sets its own Restart=.
+          Restart = lib.mkForce "always";
+          RestartSec = "30s";
         };
       };
     };
@@ -214,6 +223,9 @@ in
         "|${cfg.runner.tokenFile}"
         "|/var/lib/github-runner/${cfg.runner.name}/.runner"
       ];
+      # No start rate limit: systemd never gives up on the unit, however long
+      # Restart= has to keep retrying.
+      startLimitIntervalSec = 0;
     };
 
     # Keep parent directory traversable for the runner service process.
