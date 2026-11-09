@@ -8,8 +8,8 @@ organisation; those live in the repositories that use it.
 | Repository | Owns | Applied from |
 |---|---|---|
 | [servacho-infrastructure](https://github.com/angel-penchev/servacho-infrastructure) | The Proxmox host, UniFi and VLANs, each organisation's pool and token, the root management plane and every organisation's plane | The root plane |
-| `qoax-community/qoax-infrastructure` | Everything in Qoax Community's pool | Qoax Community's plane |
-| an FMI{Codes} repository, when there is one | Everything in FMI{Codes}' pool | FMI{Codes}' plane |
+| `qoax-community/qoax-infrastructure` | Everything in Qoax's pool | Qoax's plane |
+| a SUGAMING repository, when there is one | Everything in SUGAMING's pool | SUGAMING's plane |
 
 All of them pin this repository by tag.
 
@@ -26,7 +26,7 @@ All of them pin this repository by tag.
 
 ```nix
 {
-  inputs.reusables.url = "github:angel-penchev/infrastructure-reusables/v0.5.0";
+  inputs.reusables.url = "github:angel-penchev/infrastructure-reusables/v0.10.0";
   inputs.nixpkgs.follows = "reusables/nixpkgs";
   # or: inputs.reusables.inputs.nixpkgs.follows = "nixpkgs";
 }
@@ -252,14 +252,14 @@ tofu apply -replace='module.<name>.terraform_data.installation'
 
 ```hcl
 module "installer" {
-  source     = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/installer-iso?ref=v0.5.0"
+  source     = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/installer-iso?ref=v0.10.0"
   flake_attr = "${abspath("${path.module}/../nixos")}#installer-iso"
   iso_name   = "qoax-installer"
   node_name  = "Servacho-Gosho"
 }
 
 module "k3s_server" {
-  source           = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/nixos-vm?ref=v0.5.0"
+  source           = "github.com/angel-penchev/infrastructure-reusables//tofu/modules/nixos-vm?ref=v0.10.0"
   name             = "qoaxhack-prod-1"
   node_name        = "Servacho-Gosho"
   vm_id            = 10031
@@ -309,10 +309,10 @@ jobs:
     runs-on: [self-hosted, qoax-community-management-plane]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      - uses: angel-penchev/infrastructure-reusables/actions/openbao-unseal@v0.5.0
+      - uses: angel-penchev/infrastructure-reusables/actions/openbao-unseal@v0.10.0
         with:
           sealed_hint: servacho-infrastructure unseals it every 30 minutes.
-      - uses: angel-penchev/infrastructure-reusables/actions/tofu-plan@v0.5.0
+      - uses: angel-penchev/infrastructure-reusables/actions/tofu-plan@v0.10.0
         with:
           vault_token: ${{ secrets.OPENBAO_TOKEN }}
 ```
