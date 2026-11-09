@@ -17,7 +17,7 @@ All of them pin this repository by tag.
 
 | Output | What it is |
 |---|---|
-| `nixosModules.base` | What every VM shares: SSH by key only, the QEMU guest agent, the nftables firewall, Nix housekeeping |
+| `nixosModules.base` | What every VM shares: SSH by key only and only from the sources the host sets (`servacho.ssh`), an optional egress filter (`servacho.egress`), the QEMU guest agent, the nftables firewall, Nix housekeeping |
 | `nixosModules.management-plane` | `servacho.managementPlane.*`: OpenTofu, OpenBao on loopback, an optional GitHub runner, an optional static address |
 | `nixosModules.k3s-node` | `servacho.k3s.*`: a k3s server or agent with its firewall, flannel's backend (VXLAN or WireGuard), kubelet image garbage collection, and Longhorn's host side |
 | `nixosModules.docker-host` | `servacho.dockerHost.*`: Docker with Compose for a stack its owner runs by hand, reverse proxy included; an optional static address; the stack reachable from the LAN only on its ingress ports (`80`, `443`), and those only from the shared ingress |
@@ -70,6 +70,137 @@ servacho.dockerHost = {
   ingress.sources = [ "192.168.4.16/32" ];
 };
 ```
+
+## SSH sources and egress
+
+`base`, `k3s-node` and `docker-host` bring the options `servacho.ssh` and
+`servacho.egress` (`nixos/modules/firewall.nix`). Every host sets
+`servacho.ssh.sources`, and the evaluation fails until it does.
+
+```nix
+servacho.ssh.sources = [
+  "192.0.2.15" # the management plane that deploys the host
+  "198.51.100.0/24" # the administrators' network
+];
+servacho.egress = {
+  enable = true;
+  allowTcp = [
+    {
+      address = "10.0.0.10";
+      ports = [ 8006 ];
+    }
+  ];
+};
+```
+
+### `servacho.ssh`
+
+| Option | Default | Meaning |
+|---|---|---|
+| `sources` | none, and the evaluation fails | A list of the IPv4 and IPv6 addresses and CIDRs that may open SSH connections, or `"any"`. The value `"any"` keeps sshd open to every source, as before v0.10.0. |
+| `logOnly` | `false` | With a list: keep sshd open to every source, and record each new connection from outside the list. |
+
+With a list, the firewall closes sshd to every other source, on IPv4 and on
+IPv6. Loopback always passes. A counter and a log line, at most 6 a minute,
+record the refused connections: `journalctl -k -g servacho-ssh-refused`. On a
+k3s node, pods still reach sshd through the trusted pod interfaces.
+
+The list is a rule in table `nixos-fw`. So the evaluation fails if the NixOS
+firewall is off or does not use nftables (firewalld, or the iptables
+backend). It also fails if `networking.firewall` opens an sshd port to every
+source (`allowedTCPPorts`, a port range or `interfaces.<name>`).
+
+With a list and `logOnly`, table `inet servacho-ssh-audit` keeps each source
+from outside the list for up to 14 days:
+`nft list set inet servacho-ssh-audit outside4` (and `outside6`). The log
+line, at most 6 a minute, is in `journalctl -k -g servacho-ssh-outside`.
+Read "Sets and reloads" below before you read an empty set as clean.
+
+Two lists join. `"any"` and a list in two modules fail the evaluation.
+`lib.mkDefault "any"` gives way to a list.
+
+### `servacho.egress`
+
+| Option | Default | Meaning |
+|---|---|---|
+| `enable` | `false` | Add table `inet servacho-egress`, which refuses new connections from the host to the `blocked` destinations. |
+| `logOnly` | `false` | Record and log each connection the filter would refuse, and refuse nothing. |
+| `allow` | `[ ]` | Private addresses or CIDRs, IPv4 or IPv6, that the host may reach on every port. |
+| `allowTcp`, `allowUdp` | `[ ]` | Entries `{ address; ports; }`: a private address or CIDR, and the ports the host may reach on it. |
+| `allowInterfaces` | `[ ]` | Interfaces the filter does not judge, in addition to `lo`. nft wildcards work (`"br-*"`). |
+| `extraRules` | `""` | nft rules that accept, before the refusal. Postrouting uses them too, so use no `reject`. |
+| `blocked` | `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `224.0.0.0/4`, `255.255.255.255`, `fc00::/7`, `fe80::/10`, `ff00::/8` | The refused destinations. A definition replaces the whole list. |
+
+With `enable`:
+
+- The filter allows the host's own DNS servers on TCP and UDP. The port is
+  53, or the port in the entry. It reads `networking.nameservers`, the `dns` and
+  `networkConfig.DNS` of each `systemd.network.networks` entry, and with
+  systemd-resolved `services.resolved.settings.Resolve.DNS` and
+  `FallbackDNS`. A DNS server set in another way, or DNS over TLS on port
+  853, needs an `allowTcp` entry.
+- LLMNR is off by default (`services.resolved.settings.Resolve.LLMNR`). It
+  sends to multicast addresses that the filter refuses.
+- The evaluation fails while the host uses DHCP. DHCP renewals, and the DNS
+  server DHCP gives, are private addresses.
+- `k3s-node` adds the pod interfaces. For each `clusterNetworks` entry, it
+  also adds the peer ports: TCP 6443 and 10250, 2379-2380 on servers, and
+  flannel's UDP port. A hostNetwork pod sends as the host, so put its private
+  destinations in `allowTcp`.
+- `docker-host` adds `docker0` and `br-*`, so that the host still reaches its
+  containers. It also warns that the filter does not judge the containers.
+
+The filter judges what the host itself sends. Forwarded traffic, from pods or
+from containers on Docker bridges, passes. The filter refuses IGMP,
+`224.0.0.0/24` and `ff02::/16` with no record. It limits a compromised
+service, not root, which can delete the table.
+
+A refused TCP connection fails at once, or at the first retransmit of its SYN
+after about one second. The error is "No route to host" on IPv4 and
+"Permission denied" on IPv6. The filter also refuses a connection to a
+link-local IPv6 address, but the kernel does not tell the socket. So connect
+waits until its timeout. A connection that nat output sends to a refused
+address also waits until its timeout. Examples are a Kubernetes ClusterIP, or
+a port that Docker publishes on the host's own address. Postrouting judges
+these connections on their real destination, and drops them.
+
+To see what the filter refused:
+
+```bash
+nft list set inet servacho-egress refused4 # and refused6
+journalctl -k -g servacho-egress # the log, at most 6 lines a minute
+```
+
+### Sets and reloads
+
+The sets `outside4`, `outside6`, `refused4` and `refused6` keep each entry
+for 14 days, but only until nftables.service loads the rules again. Each
+load deletes the tables and adds them again, and this empties the sets. A
+load comes with each reboot, and with each deploy that changes an nftables
+table on the host. The journal keeps the log lines across a load.
+
+Before you read an empty set as clean, find when the rules were last loaded:
+
+```bash
+journalctl -u nftables.service -g 'Finished|Reloaded'
+```
+
+If a load came during the period you audit, also read the log for that
+period: `journalctl -k -g servacho-ssh-outside` or
+`journalctl -k -g servacho-egress`.
+
+### Upgrading to v0.10.0
+
+1. Set `servacho.ssh.sources` on every host that imports `base`, `k3s-node`
+   or `docker-host`. The value `"any"` keeps sshd as it is. With `"any"` and
+   the egress filter off, the system does not change. Each example that
+   v0.9.1 also has evaluates to the same system as with v0.9.1.
+2. Before a host gets a list, add its deployer to the list. The deployer is
+   the management plane that deploys the host. Without it, the next deploy
+   fails.
+3. Turn the egress filter on with `logOnly = true` first. Read `refused4` and
+   the log (see "Sets and reloads"), add what the host needs, then enforce
+   it.
 
 ## OpenTofu modules
 
@@ -194,9 +325,30 @@ bounds the plane's memory however many hosts the repository has.
 
 ## Checks
 
-`nix flake check` builds an example management plane, k3s server and agent,
-Docker host and installer; CI also checks formatting and validates the
-OpenTofu modules.
+`nix flake check` builds the example systems in `flake.nix` and runs the
+other checks. The examples are a management plane, a Docker host, an egress
+host and the installer. There is also a k3s server and a k3s agent, each with
+and without the egress filter.
+
+- `firewall-eval`: evaluation only. It makes sure that each assertion in
+  `firewall.nix` fails where it must and nowhere else. It also checks how the
+  options merge, which addresses the options accept, and the text of the
+  generated rules. Its evaluation prints one warning from nixpkgs, about a
+  merge of an `either` type. The case where `"any"` and a list conflict
+  causes it, and the warning is expected.
+- `nftables-rules`: the nftables script of each example. The build checks
+  each script with `nft --check` under LKL only, which can accept a rule that
+  the kernel refuses. So CI also runs each script as root in a new network
+  namespace, two times.
+- `firewall-vm`: a NixOS test with three VMs. A target has an SSH list and
+  the egress filter, and two clients are in the list or not. The test
+  connects to SSH from both clients, and from the target to allowed and
+  refused destinations on IPv4 and IPv6. Then it reloads nftables.service.
+  It needs KVM, so CI runs it in its own job, and the job fails if
+  `/dev/kvm` is not usable.
+
+CI also checks formatting and validates the OpenTofu modules. To run one
+check: `nix build -L .#checks.x86_64-linux.firewall-vm`.
 
 ## Commit messages
 
