@@ -4,10 +4,13 @@
 # place without filling the disk.
 { pkgs, ... }:
 {
+  imports = [ ./firewall.nix ];
+
   services.qemuGuest.enable = true;
 
   # Keys only. The installer, cloud-init or the deployment tool puts the
-  # management plane's key in root's authorized_keys; nothing else logs in.
+  # management plane's key in root's authorized_keys, and no other key is set
+  # here. servacho.ssh.sources (firewall.nix) sets which addresses may connect.
   services.openssh = {
     enable = true;
     settings = {

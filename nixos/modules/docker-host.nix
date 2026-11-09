@@ -33,6 +33,8 @@ let
   ) ''iifname "${nic}" tcp dport ${ports} ip saddr ${nftSet cfg.ingress.sources} accept'';
 in
 {
+  imports = [ ./firewall.nix ];
+
   options.servacho.dockerHost = {
     enable = mkEnableOption "a servacho Docker host";
 
@@ -95,6 +97,14 @@ in
   };
 
   config = mkIf cfg.enable {
+    # Used only when the host turns servacho.egress on, so that the host still
+    # reaches its containers.
+    servacho.egress.allowInterfaces = [
+      "docker0"
+      "br-*"
+    ];
+    warnings = lib.optional config.servacho.egress.enable "servacho.egress filters only what the host itself sends. Containers on Docker bridges go through the forward path, and the filter does not judge them.";
+
     # Containers log to the journal, NixOS's default for Docker, which base
     # caps at 1 GiB; images, containers and networks no stack uses are pruned
     # weekly. Compose comes with the docker package as its plugin.

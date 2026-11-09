@@ -37,8 +37,9 @@
     in
     {
       nixosModules = {
-        # What every VM shares: SSH by key only, the QEMU guest agent, the
-        # nftables firewall, Nix housekeeping.
+        # What every VM shares: SSH by key only from the sources each host
+        # sets, an optional egress filter, the QEMU guest agent, the nftables
+        # firewall, Nix housekeeping.
         base = ./nixos/modules/base.nix;
         # servacho.managementPlane.*: OpenTofu, OpenBao and an optional runner.
         management-plane = ./nixos/modules/management-plane.nix;
@@ -75,6 +76,7 @@
                   ephemeral = true;
                 };
               };
+              servacho.ssh.sources = "any";
             }
           ]).config.system.build.toplevel;
         k3s-server =
@@ -93,6 +95,7 @@
                 longhorn.enable = true;
               };
               servacho.proxmoxGuest.dataDisks = [ "/var/lib/longhorn" ];
+              servacho.ssh.sources = "any";
             }
           ]).config.system.build.toplevel;
         k3s-agent =
@@ -112,6 +115,7 @@
                   lowThreshold = 60;
                 };
               };
+              servacho.ssh.sources = "any";
             }
           ]).config.system.build.toplevel;
         docker-host =
@@ -126,6 +130,7 @@
                 network = exampleNetwork;
                 ingress.sources = [ "198.51.100.16/32" ];
               };
+              servacho.ssh.sources = "any";
             }
           ]).config.system.build.toplevel;
         installer =
