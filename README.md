@@ -97,6 +97,13 @@ memory back to the host under pressure, down to that much. It suits a
 management plane, whose plans need memory only now and then; leave it at 0 for
 a Kubernetes node.
 
+`started = false` shuts the VM down at the next apply and keeps it off. The
+provider reads the power state back. Without `started`, every apply starts a VM
+that was shut down by hand. Set `on_boot = false` with it, so a restart of the
+Proxmox node does not start the VM either. A new VM needs `started = true`,
+because the install runs on the started installer. While the VM is off, a
+change to its host configuration fails the deploy.
+
 `data_disks` attaches disks after the system disk, `/dev/vdb` onwards, which
 the host mounts through `servacho.proxmoxGuest.dataDisks` (one ext4 filesystem
 per disk, grown with it). `extra_files` places files the host's configuration
