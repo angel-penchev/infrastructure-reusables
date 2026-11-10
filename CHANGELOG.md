@@ -117,16 +117,16 @@ release of each tag has the same text.
 
 ### Fixes
 
-- **`nixos-vm`'s `extra_files` works.** `extra-files.sh` shipped without its
-  executable bit in v0.6.0 and v0.7.0, so nixos-anywhere refused to run it,
-  and every install that set `extra_files` failed with `extra_files_script …
-  is not executable`.
-- CI now fails on any shell script committed without its executable bit.
+- **`extra_files` of `nixos-vm` works.** v0.6.0 and v0.7.0 shipped
+  `extra-files.sh` without its executable bit. Thus nixos-anywhere refused to
+  run it, and every install that set `extra_files` failed with
+  `extra_files_script … is not executable`.
+- CI now fails on each shell script that has no executable bit in the commit.
 
 ### Upgrading
 
-- Move from v0.6.0 or v0.7.0 if you use `extra_files`. A failed install is
-  retried on the next apply.
+- Move from v0.6.0 or v0.7.0 if you use `extra_files`. The next apply tries a
+  failed install again.
 
 ## v0.7.0
 
@@ -151,98 +151,99 @@ release of each tag has the same text.
 - **`nixos-vm` `data_disks`** attaches disks after the system disk (`virtio1`
   onwards). `backup = false` keeps a disk out of Proxmox backups.
 - **`proxmox-guest` `servacho.proxmoxGuest.dataDisks`** mounts those disks
-  (`/dev/vdb` onwards), each as one ext4 filesystem. disko formats them at
-  install, and they grow with the disk on the next boot.
-- **`nixos-vm` `extra_files`** (sensitive, absolute path → content) places
-  files at install through nixos-anywhere, such as a k3s join token in
-  `/etc/rancher/k3s/config.yaml`. The content travels in the install script's
-  environment, not through the state or the Nix store. Files are 0600,
-  directories 0755.
+  (`/dev/vdb` onwards), each as one ext4 filesystem. At install, disko formats
+  them, and they grow with the disk on the next boot.
+- **`nixos-vm` `extra_files`** (sensitive, absolute path → content) puts files
+  on the host at install through nixos-anywhere, such as a k3s join token in
+  `/etc/rancher/k3s/config.yaml`. The content goes in the environment of the
+  install script, not through the state or the Nix store. Files are 0600, and
+  directories are 0755.
 - **`k3s-node`**:
-  - `imageGC = { highThreshold; lowThreshold; }` sets the kubelet's image
-    garbage collection thresholds, for nodes that pull many short-lived
+  - `imageGC = { highThreshold; lowThreshold; }` sets the thresholds of the
+    kubelet's image garbage collection, for nodes that pull many short-lived
     images.
   - `flannelBackend` is `vxlan` (the default) or `wireguard-native`, and opens
     the matching port.
-  - `apiSources` opens a server's API (6443) to more sources, and nothing
+  - `apiSources` opens the API of a server (6443) to more sources, and nothing
     else.
 
 ### Fixes
 
-- **Planes no longer run out of memory in a plan.**
+- **A plan no longer uses all the memory of a plane.**
   - `actions/tofu-plan` and `actions/tofu-apply` run OpenTofu with
     `-parallelism 4` by default (new `parallelism` input). Each NixOS host or
-    ISO a plan reads is a Nix evaluation of up to about 0.75 GB, so this
-    bounds memory however many hosts a repository has.
-  - `nixosModules.management-plane` turns on zram swap (50% of RAM).
-- The commit hook moves to qoax-githooks v1.0.7.
+    ISO that a plan reads is a Nix evaluation of up to about 0.75 GB. Thus
+    this limit bounds the memory, however many hosts a repository has.
+  - `nixosModules.management-plane` enables zram swap (50% of RAM).
+- The commit hook now uses qoax-githooks v1.0.7.
 
 ### Upgrading
 
-- Nothing changes for existing hosts unless they set the new options. A
-  management plane gains zram swap on its next deploy.
-- `proxmox-guest` now declares an option, so its settings sit under `config`.
+- Existing hosts do not change unless they set the new options. A management
+  plane gets zram swap on its next deploy.
+- `proxmox-guest` now declares an option, so its settings are under `config`.
   A host that imported it keeps the same disk layout.
-- Give a plane enough memory for four evaluations at once plus OpenBao and the
-  runner. 8 GiB leaves room.
+- Give a plane enough memory for four evaluations at the same time, plus
+  OpenBao and the runner. 8 GiB is enough.
 
 ## v0.5.0
 
 ### New
 
-- **GitHub Actions for the planes' workflows**, composite actions shared by
-  servacho-infrastructure and the organisations' repositories:
-  - `actions/openbao-unseal` unseals the plane's OpenBao with `unseal_keys`.
-    Without keys it only checks the seal, and fails with `sealed_hint` when
-    the plane is sealed.
-  - `actions/tofu-plan` runs `tofu init` and `plan`, posts the plan on the
-    pull request (replacing the last plan until an apply follows), then fails
-    if the plan failed.
-  - `actions/tofu-apply` runs `tofu init` and `apply`, then posts the outcome
-    on the pull request the applied commit belongs to.
+- **GitHub Actions for the workflows of the planes.** servacho-infrastructure
+  and the repositories of the organisations share these composite actions:
+  - `actions/openbao-unseal` unseals the OpenBao of the plane with
+    `unseal_keys`. Without keys, it only checks the seal, and fails with
+    `sealed_hint` when the plane is sealed.
+  - `actions/tofu-plan` runs `tofu init` and `plan`, and posts the plan on the
+    pull request. Each new plan replaces the last one, until an apply follows.
+    Then the action fails if the plan failed.
+  - `actions/tofu-apply` runs `tofu init` and `apply`, then posts the result
+    on the pull request of the applied commit.
 
 ### Upgrading
 
 - Use them with `uses:
   angel-penchev/infrastructure-reusables/actions/<name>@v0.5.0`. The runner
-  needs `tofu`, `curl` and `jq`, which `nixosModules.management-plane`'s
-  runner has. A runner started before v0.4.0 must be restarted to pick up
+  needs `tofu`, `curl` and `jq`. The runner of `nixosModules.management-plane`
+  has them. Restart a runner that started before v0.4.0, so that it gets
   `curl`.
-- The NixOS and OpenTofu modules are unchanged since v0.4.0.
+- The NixOS and OpenTofu modules are the same as in v0.4.0.
 
 ## v0.4.0
 
 ### Fixes
 
-- **installer-iso keeps the uploaded ISO from the garbage collector.**
-  `bpg/proxmox` reads the uploaded ISO's local file on every refresh, so after
-  the plane's Nix GC removed it, every plan failed with `no such file or
-  directory`. Two changes fix it:
-  - A plan now realises the ISO, which also recovers a state whose ISO was
-    already collected.
+- **installer-iso keeps the uploaded ISO safe from the garbage collector.**
+  The provider `bpg/proxmox` reads the local file of the uploaded ISO on every
+  refresh. After the Nix GC on the plane removed that file, every plan failed
+  with `no such file or directory`. Two changes fix it:
+  - A plan now realises the ISO. This also repairs a state whose ISO the GC
+    removed already.
   - Each uploaded build keeps a GC root in the new `gc_root_dir` (default
     `/var/lib/opentofu/gcroots`) until a newer build replaces it.
 
 ### Upgrading
 
-- Nothing to change in the `module` block unless your runner's OpenTofu state
-  directory is not `/var/lib/opentofu`.
-- The first apply swaps `terraform_data.build` for `terraform_data.gc_root`
-  and leaves the uploaded ISO in place.
-- A plan may build the ISO when it is missing from the store (about 1.5 GB,
-  mostly from the binary cache).
+- You do not need to change the `module` block, unless the OpenTofu state
+  directory of your runner is not `/var/lib/opentofu`.
+- The first apply replaces `terraform_data.build` with
+  `terraform_data.gc_root`, and keeps the uploaded ISO in place.
+- If the ISO is not in the store, a plan can build it. That is about 1.5 GB,
+  mostly from the binary cache.
 
 ## v0.3.0
 
 ### Features
 
-- **The management-plane runner waits for its token.** `github-runner-<name>`
-  is skipped, not failed, until its token file exists or it has registered
-  (`/var/lib/github-runner/<name>/.runner`). A plane can therefore be deployed
+- **The management-plane runner waits for its token.** Until its token file
+  exists or the runner has a registration
+  (`/var/lib/github-runner/<name>/.runner`), systemd skips
+  `github-runner-<name>` and does not fail it. Thus you can deploy a plane
   with `servacho.managementPlane.runner.enable = true` before its registration
-  token is placed, and the token can be delivered afterwards, as
-  servacho-infrastructure does from its root plane. Runners that are already
-  registered are unaffected.
+  token is in place. You can then supply the token later.
+  servacho-infrastructure does this from its root plane. A runner with an
+  existing registration does not change.
 - **The runner has `curl`** on its path.
 
 ## v0.2.0
@@ -250,24 +251,26 @@ release of each tag has the same text.
 ### Breaking
 
 - **installer-iso follows the flake.** The `generation` variable is gone. The
-  ISO is rebuilt whenever its store path changes (nixpkgs, the keys it lets
-  in, the installer module). Each build is uploaded as `<iso_name>-<hash>.iso`
-  before the previous one is deleted, so attached VMs are moved onto it first
-  and old ISOs do not pile up. Remove `generation` from your `module` blocks.
-  The first apply replaces the ISO uploaded by v0.1.0.
+  module builds the ISO again whenever its store path changes (nixpkgs, the
+  keys it lets in, the installer module). It uploads each build as
+  `<iso_name>-<hash>.iso`, moves the attached VMs onto it, and then deletes
+  the previous one. Thus old ISOs do not stay on the storage. Remove
+  `generation` from your `module` blocks. The first apply replaces the ISO
+  that v0.1.0 uploaded.
 
 ### Fixes
 
 - **nixos-vm reinstalls only when OpenTofu replaces the VM** (#2).
-  `installation_id` no longer comes from the MAC address, so a VM restored
-  from a backup under the same id keeps its disk. To reinstall on purpose:
-  `tofu apply -replace='module.<vm>.terraform_data.installation'`. **Do not
-  move a VM that v0.1.0 already installed onto this release:** its
-  `installation_id` changes once, and nixos-anywhere would install it again,
-  wiping its disk. No VM has been installed with v0.1.0.
-- **The installer's guest agent answers only once DHCP has given it an IPv4
-  address.** `nixos-vm` therefore never falls back to installing to the host's
-  static address before the installer has one.
+  `installation_id` no longer comes from the MAC address. Thus a VM that you
+  restore from a backup under the same id keeps its disk. To reinstall on
+  purpose, run `tofu apply
+  -replace='module.<vm>.terraform_data.installation'`. **Do not move a VM that
+  v0.1.0 already installed onto this release.** Its `installation_id` changes
+  one time. Then nixos-anywhere would install it again and erase its disk.
+  v0.1.0 installed no VM.
+- **The installer's guest agent answers only after DHCP gives it an IPv4
+  address.** Thus `nixos-vm` never uses the host's static address for the
+  install before the installer has an address.
 
 ## v0.1.0
 
