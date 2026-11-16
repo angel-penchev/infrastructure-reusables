@@ -89,11 +89,18 @@ pkgs.testers.runNixOSTest (
           return status
 
       start_all()
+      # The unit network-addresses-eth1.service starts when udev reports eth1,
+      # and that can be after multi-user.target. For an inactive unit,
+      # wait_for_unit fails at once if the system has no jobs. The port check
+      # of wait_for_open_port connects to localhost, not to eth1.
+      unit = "network-addresses-eth1.service"
+      for machine in machines:
+          machine.wait_until_succeeds(f"systemctl is-active {unit} || systemctl is-failed --quiet {unit}")
+          machine.succeed(f"systemctl is-active {unit}")
       target.wait_for_unit("nftables.service")
       target.wait_for_unit("sshd.service")
       listed.wait_for_open_port(80)
       listed.wait_for_open_port(81)
-      unlisted.wait_for_unit("multi-user.target")
 
       with subtest("sshd answers the listed client only, on IPv4 and IPv6"):
           assert connect(listed, "${target4}", 22) == 0
@@ -130,7 +137,10 @@ pkgs.testers.runNixOSTest (
           refused6 = target.succeed("nft list set inet servacho-egress refused6")
           assert "${listedUla} . tcp . 81" in refused6, refused6
           assert f"{link_local} . tcp . 80" in refused6, refused6
-          target.succeed("test $(journalctl -k --no-pager | grep -c 'servacho-egress: ') -gt 0")
+          target.wait_until_succeeds(
+              "test $(journalctl -k --no-pager | grep -c 'servacho-egress: .*DST=${listed4} .*DPT=81 ') -gt 0",
+              timeout=60,
+          )
 
       with subtest("a reload of nftables.service empties the sets, the journal keeps the log"):
           target.succeed("systemctl reload nftables.service")
