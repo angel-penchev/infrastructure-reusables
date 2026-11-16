@@ -33,8 +33,30 @@ let
   clusterUdpPorts = if cfg.flannelBackend == "wireguard-native" then [ 51820 ] else [ 8472 ];
 
   nftSet = xs: "{ ${lib.concatStringsSep ", " (map toString xs)} }";
+
+  # Host to pod and host to ClusterIP traffic leaves by these. The input
+  # firewall trusts them, and the egress filter lets them pass.
+  podInterfaces = [
+    "cni0"
+    "flannel.1"
+    "flannel-wg"
+  ];
+  # The ports a node opens connections to on the other nodes: the API and
+  # supervisor on servers (agents, joins), the kubelet (from servers), and
+  # etcd between servers. Ports only, so a clusterNetworks entry that is a
+  # whole VLAN does not open every port on it.
+  peerTcpPorts = [
+    6443
+    10250
+  ]
+  ++ lib.optionals (cfg.role == "server") [
+    2379
+    2380
+  ];
 in
 {
+  imports = [ ./firewall.nix ];
+
   options.servacho.k3s = {
     enable = mkEnableOption "a servacho k3s node";
 
@@ -58,7 +80,9 @@ in
         Source CIDRs allowed to reach the node's cluster ports (API, etcd,
         kubelet, flannel): normally the VLAN the cluster's nodes sit on. Pod
         and service traffic arrives on the CNI interfaces, which are trusted
-        regardless.
+        regardless. With servacho.egress on, the node may also open
+        connections to these on the peer ports (6443, 10250, 2379-2380 on
+        servers, flannel's UDP port).
       '';
     };
 
@@ -194,12 +218,24 @@ in
       after = mkIf config.services.cloud-init.enable [ "cloud-final.service" ];
     };
 
+    # Used only when the host turns servacho.egress on. Traffic from pods is
+    # forwarded, so the egress filter does not judge it: that is the job of
+    # NetworkPolicy. hostNetwork pods are host traffic, and the host gives
+    # their private destinations in servacho.egress.allowTcp.
+    servacho.egress = {
+      allowInterfaces = podInterfaces;
+      allowTcp = map (address: {
+        inherit address;
+        ports = peerTcpPorts;
+      }) cfg.clusterNetworks;
+      allowUdp = map (address: {
+        inherit address;
+        ports = clusterUdpPorts;
+      }) cfg.clusterNetworks;
+    };
+
     networking.firewall = {
-      trustedInterfaces = [
-        "cni0"
-        "flannel.1"
-        "flannel-wg"
-      ];
+      trustedInterfaces = podInterfaces;
       allowedTCPPorts = mkIf cfg.exposeIngress [
         80
         443

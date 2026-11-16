@@ -21,8 +21,58 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: Formatting
         run: nix fmt -- --ci
-      - name: Evaluate and build the example systems
-        run: nix flake check --print-build-logs
+      - name: Evaluate every check
+        run: nix flake check --no-build
+      # checks.firewall-vm needs KVM and runs in its own job.
+      - name: Build the example systems and the evaluation checks
+        run: |
+          nix eval --json .#checks.x86_64-linux \
+            --apply 'checks: builtins.attrNames (removeAttrs checks [ "firewall-vm" ])' \
+            | jq -r '.[] | ".#checks.x86_64-linux.\(.)"' \
+            | xargs nix build --no-link --print-build-logs
+      # The build checks each ruleset only with nft --check under LKL, which
+      # can accept a rule the kernel refuses. On a host, that rule fails the
+      # switch, or after a reboot leaves the host with no firewall. So each
+      # script runs as root in a new network namespace: a start, then a
+      # reload.
+      - name: Load each example's nftables rules into the kernel
+        run: |
+          rules=$(nix build --no-link --print-out-paths .#checks.x86_64-linux.nftables-rules)
+          for script in "$rules"/*; do
+            echo "::group::$(basename "$script")"
+            sudo unshare --net sh -euc '
+              mkdir -p /var/lib/nftables
+              touch /var/lib/nftables/deletions.nft
+              "$1"
+              "$1"
+            ' sh "$(readlink -f "$script")"
+            echo "::endgroup::"
+          done
+
+  firewall-vm:
+    name: Firewall VM test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # GitHub's udev rule for hosted Linux runners: it lets every user,
+      # the Nix build users too, open /dev/kvm. It comes before Nix, so the
+      # daemon starts with the kvm system feature. udevadm settle waits until
+      # udev sets the new mode, so the test below does not read the old one.
+      # Without KVM the job fails, because a skipped test would leave this
+      # check green with no VM test run.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle
+          if ! [ -r /dev/kvm ] || ! [ -w /dev/kvm ]; then
+            echo "::error::/dev/kvm is not usable on this runner, so checks.firewall-vm cannot run."
+            exit 1
+          fi
+      - uses: cachix/install-nix-action@v31
+      - name: Run checks.firewall-vm
+        run: nix build --no-link --print-build-logs .#checks.x86_64-linux.firewall-vm
 
   scripts:
     name: Scripts are executable
