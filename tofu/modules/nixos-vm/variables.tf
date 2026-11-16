@@ -89,6 +89,12 @@ variable "on_boot" {
   default = true
 }
 
+variable "started" {
+  type        = bool
+  default     = true
+  description = "false shuts the VM down at the next apply and keeps it off. The provider reads the power state back, so otherwise every apply starts it again. Set on_boot = false with it. A new VM needs true, because the install runs on the started installer. While the VM is off, a change to its host configuration fails the deploy."
+}
+
 variable "installer_iso_id" {
   type        = string
   description = "Volume id of the installer ISO, from installer-iso's file_id. Its root must accept ssh_private_key."

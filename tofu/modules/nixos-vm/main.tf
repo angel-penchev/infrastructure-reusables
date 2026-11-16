@@ -44,6 +44,7 @@ resource "proxmox_virtual_environment_vm" "this" {
   tags          = var.tags
   scsi_hardware = "virtio-scsi-single"
   on_boot       = var.on_boot
+  started       = var.started
 
   # The disk first: until nixos-anywhere has put GRUB on it, SeaBIOS falls
   # through to the installer; afterwards it boots the installed system.
